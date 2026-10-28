@@ -5,6 +5,8 @@ permissions:
 
 on:
   push:
+    branches-ignore:
+      - steady/**
   pull_request:
     branches:
       - master

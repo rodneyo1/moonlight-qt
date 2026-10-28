@@ -1,0 +1,93 @@
+name: STEADY Windows baseline
+
+on:
+  push:
+    branches: [steady/windows-baseline]
+    paths: [.github/workflows/steady-windows-baseline.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steady-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install upstream Qt version
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.12.0'
+          arch: win64_msvc2022_64
+          cache: true
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@073e34d7c2ab4ae6961ed7cca690b3abd5ba5a7e
+
+      - name: Fetch pinned Windows x64 libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest 'https://github.com/moonlight-stream/moonlight-qt-deps/releases/download/v19/Windows-x64.zip' -OutFile deps-x64.zip
+          $expectedHash = '65FF1BD439222E1E2750054F960DCD6FAC46190027DA16DB7403E345C295F10F'
+          if ((Get-FileHash deps-x64.zip -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Dependency archive checksum mismatch' }
+          Expand-Archive deps-x64.zip libs/windows
+
+      - name: Build unmodified Windows client sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw 'MSVC build tools unavailable' }
+          $devCmd = '"' + $vsRoot + '\VC\Auxiliary\Build\vcvars64.bat" >nul && set'
+          $devEnvironment = & cmd.exe /d /s /c $devCmd
+          if ($LASTEXITCODE) { throw 'MSVC environment setup failed' }
+          foreach ($line in $devEnvironment) {
+            if ($line -match '^(PATH|INCLUDE|LIB|LIBPATH|VC\w*|Windows\w*|UniversalCRT\w*|UCRT\w*)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+            }
+          }
+          New-Item -ItemType Directory build-baseline -Force | Out-Null
+          git rev-parse HEAD | Set-Content build-baseline/source-pin.txt
+          git submodule status --recursive | Set-Content build-baseline/submodule-pins.txt
+          qmake -v | Set-Content build-baseline/qt-version.txt
+          Push-Location build-baseline
+          try {
+            qmake ../moonlight-qt.pro
+            if ($LASTEXITCODE) { throw 'qmake failed' }
+            nmake /NOLOGO release
+            if ($LASTEXITCODE) { throw 'Client build failed' }
+          } finally { Pop-Location }
+
+      - name: Prepare unsigned portable baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory baseline-package -Force | Out-Null
+          Copy-Item libs/windows/lib/x64/*.dll baseline-package
+          Copy-Item build-baseline/AntiHooking/release/AntiHooking.dll baseline-package
+          Copy-Item build-baseline/app/release/Moonlight.exe baseline-package
+          Copy-Item app/SDL_GameControllerDB/gamecontrollerdb.txt baseline-package
+          windeployqt --release --dir baseline-package --qmldir app/gui --no-translations --no-opengl-sw baseline-package/Moonlight.exe
+          if ($LASTEXITCODE) { throw 'Qt deployment failed' }
+          New-Item -ItemType File baseline-package/portable.dat -Force | Out-Null
+
+      - name: Preserve baseline evidence and binaries
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: moonlight-windows-x64-baseline
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            baseline-package/
+            build-baseline/*-pin*.txt
+            build-baseline/qt-version.txt
