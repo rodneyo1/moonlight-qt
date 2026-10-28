@@ -76,9 +76,21 @@ jobs:
           Copy-Item build-baseline/AntiHooking/release/AntiHooking.dll baseline-package
           Copy-Item build-baseline/app/release/Moonlight.exe baseline-package
           Copy-Item app/SDL_GameControllerDB/gamecontrollerdb.txt baseline-package
-          windeployqt --release --dir baseline-package --qmldir app/gui --no-translations --no-opengl-sw baseline-package/Moonlight.exe
+          Copy-Item LICENSE baseline-package
+          windeployqt --release --dir baseline-package --qmldir app/gui --no-translations --no-opengl-sw --no-compiler-runtime baseline-package/Moonlight.exe
           if ($LASTEXITCODE) { throw 'Qt deployment failed' }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $runtimeDirectory = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT' | Select-Object -First 1
+          if (-not $runtimeDirectory) { throw 'MSVC runtime DLL directory unavailable' }
+          Copy-Item "$runtimeDirectory\*.dll" baseline-package
           New-Item -ItemType File baseline-package/portable.dat -Force | Out-Null
+
+      - name: Verify portable runtime entry point
+        shell: pwsh
+        run: |
+          $versionOutput = & ./baseline-package/Moonlight.exe --version
+          if ($LASTEXITCODE) { throw 'Portable client runtime check failed' }
+          $versionOutput | Set-Content build-baseline/runtime-version.txt
 
       - name: Preserve baseline evidence and binaries
         if: always()
@@ -91,3 +103,4 @@ jobs:
             baseline-package/
             build-baseline/*-pin*.txt
             build-baseline/qt-version.txt
+            build-baseline/runtime-version.txt
