@@ -58,6 +58,7 @@ jobs:
           New-Item -ItemType Directory build-baseline -Force | Out-Null
           git rev-parse HEAD | Set-Content build-baseline/source-pin.txt
           git submodule status --recursive | Set-Content build-baseline/submodule-pins.txt
+          $env:VCToolsVersion | Set-Content build-baseline/compiler-toolset-version.txt
           qmake -v | Set-Content build-baseline/qt-version.txt
           Push-Location build-baseline
           try {
@@ -80,9 +81,15 @@ jobs:
           windeployqt --release --dir baseline-package --qmldir app/gui --no-translations --no-opengl-sw --no-compiler-runtime baseline-package/Moonlight.exe
           if ($LASTEXITCODE) { throw 'Qt deployment failed' }
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $runtimeDirectory = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT' | Select-Object -First 1
-          if (-not $runtimeDirectory) { throw 'MSVC runtime DLL directory unavailable' }
+          $runtimeCandidates = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT\msvcp140.dll'
+          $runtimeDll = $runtimeCandidates | Get-Item | Sort-Object { [version](($_.VersionInfo.FileVersion -split ' ')[0]) } -Descending | Select-Object -First 1
+          if (-not $runtimeDll) { throw 'MSVC runtime DLL directory unavailable' }
+          $runtimeVersion = [version](($runtimeDll.VersionInfo.FileVersion -split ' ')[0])
+          $compilerVersion = [version]((Get-Content build-baseline/compiler-toolset-version.txt -Raw).Trim())
+          if ($runtimeVersion -lt $compilerVersion) { throw "Runtime $runtimeVersion is older than compiler toolset $compilerVersion" }
+          $runtimeDirectory = $runtimeDll.DirectoryName
           Copy-Item "$runtimeDirectory\*.dll" baseline-package
+          $runtimeVersion.ToString() | Set-Content build-baseline/runtime-dll-version.txt
           New-Item -ItemType File baseline-package/portable.dat -Force | Out-Null
 
       - name: Verify portable runtime entry point
@@ -103,4 +110,6 @@ jobs:
             baseline-package/
             build-baseline/*-pin*.txt
             build-baseline/qt-version.txt
+            build-baseline/compiler-toolset-version.txt
+            build-baseline/runtime-dll-version.txt
             build-baseline/runtime-version.txt
