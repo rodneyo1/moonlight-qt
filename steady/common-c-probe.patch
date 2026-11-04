@@ -1,0 +1,115 @@
+--- a/src/ControlStream.c
++++ b/src/ControlStream.c
+@@ -1,4 +1,8 @@
+ #include "Limelight-internal.h"
++#include "SteadyProbe.h"
++static void steadyProbeInit(void);
++static void steadyProbeStop(void);
++static void steadyProbeDestroy(void);
+ 
+ // This is a private header, but it just contains some time macros
+ #include <enet/time.h>
+@@ -354,6 +358,7 @@
+     usePeriodicPing = APP_VERSION_AT_LEAST(7, 1, 415);
+     encryptionCtx = PltCreateCryptoContext();
+     decryptionCtx = PltCreateCryptoContext();
++    steadyProbeInit();
+     hdrEnabled = false;
+     memset(&hdrMetadata, 0, sizeof(hdrMetadata));
+ 
+@@ -373,6 +378,8 @@
+ // Cleans up control stream
+ void destroyControlStream(void) {
+     LC_ASSERT(stopping);
++    steadyProbeStop();
++    steadyProbeDestroy();
+     PltDestroyCryptoContext(encryptionCtx);
+     PltDestroyCryptoContext(decryptionCtx);
+     PltCloseEvent(&idrFrameRequiredEvent);
+@@ -718,6 +725,11 @@
+         encPacket = (PNVCTL_ENCRYPTED_PACKET_HEADER)enetPacket->data;
+         encPacket->encryptedHeaderType = 0x0001;
+         encPacket->length = sizeof(encPacket->seq) + AES_GCM_TAG_LENGTH + sizeof(*packet) + paylen;
++        if (ptype == STEADY_PROBE_TYPE && currentEnetSequenceNumber == UINT32_MAX) {
++            enet_packet_destroy(enetPacket);
++            PltUnlockMutex(&enetMutex);
++            return false;
++        }
+         encPacket->seq = currentEnetSequenceNumber++;
+ 
+         // Construct the plaintext data for encryption
+@@ -1017,6 +1029,8 @@
+         free(queuedCb);
+     }
+ }
++
++#include "SteadyProbeClient.inc"
+ 
+ static bool needsAsyncCallback(unsigned short packetType) {
+     return packetType == packetTypes[IDX_RUMBLE_DATA] ||
+@@ -1260,6 +1274,13 @@
+ 
+             // All below codepaths must free ctlHdr!!!
+ 
++            if (ctlHdr->type == STEADY_PROBE_TYPE && encryptedControlStream &&
++                    (EncryptionFeaturesEnabled & SS_ENC_CONTROL_V2)) {
++                steadyProbeReceive((const unsigned char*)(ctlHdr+1),(size_t)packetLength-sizeof(*ctlHdr));
++                free(ctlHdr);
++                continue;
++            }
++
+             // Process HDR data immediately to update global HDR enabled state and HDR metadata.
+             // The actual client callback will be invoked in the async callback thread.
+             if (ctlHdr->type == packetTypes[IDX_HDR_INFO]) {
+@@ -1640,6 +1661,7 @@
+ // Stops the control stream
+ int stopControlStream(void) {
+     stopping = true;
++    steadyProbeStop();
+     LbqSignalQueueShutdown(&referenceFrameControlQueue);
+     LbqSignalQueueShutdown(&frameFecStatusQueue);
+     LbqSignalQueueDrain(&asyncCallbackQueue);
+@@ -2067,6 +2089,7 @@
+         }
+     }
+ 
++    steadyProbeStart();
+     return 0;
+ }
+ 
+--- a/src/Limelight-internal.h
++++ b/src/Limelight-internal.h
+@@ -113,6 +113,7 @@
+ 
+ char* getSdpPayloadForStreamConfig(int rtspClientVersion, int* length);
+ 
++void steadyProbeSetPeerVersion(uint32_t version);
+ int initializeControlStream(void);
+ int startControlStream(void);
+ int stopControlStream(void);
+--- a/src/RtspConnection.c
++++ b/src/RtspConnection.c
+@@ -1,4 +1,5 @@
+ #include "Limelight-internal.h"
++#include "SteadyProbe.h"
+ #include "Rtsp.h"
+ 
+ #define RTSP_CONNECT_TIMEOUT_SEC 10
+@@ -945,6 +946,8 @@
+     int ret;
+ 
+     LC_ASSERT(RtspPortNumber != 0);
++
++    steadyProbeSetPeerVersion(0);
+ 
+     // Initialize global state
+     useEnet = (AppVersionQuad[0] >= 5) && (AppVersionQuad[0] <= 7) && (AppVersionQuad[2] < 404);
+@@ -1147,6 +1150,8 @@
+         }
+ 
+         // Look for the Sunshine encryption flags in the SDP attributes
++        steadyProbeSetPeerVersion(steady_probe_sdp_version(response.payload));
++
+         if (!parseSdpAttributeToUInt(response.payload, "x-ss-general.encryptionSupported", &EncryptionFeaturesSupported)) {
+             EncryptionFeaturesSupported = 0;
+         }

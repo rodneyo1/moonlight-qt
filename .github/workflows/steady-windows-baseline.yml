@@ -40,7 +40,11 @@ jobs:
           if ((Get-FileHash deps-x64.zip -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Dependency archive checksum mismatch' }
           Expand-Archive deps-x64.zip libs/windows
 
-      - name: Build unmodified Windows client sources
+      - name: Apply pinned opt-in calibration patch
+        shell: pwsh
+        run: ./steady/apply-common-probe.ps1
+
+      - name: Build Windows client with opt-in control calibration
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -56,6 +60,10 @@ jobs:
             }
           }
           New-Item -ItemType Directory build-baseline -Force | Out-Null
+          & cl.exe /nologo /std:c11 /W4 /WX /MT /O2 /Fe:build-baseline/probe-tests.exe /Fo:build-baseline/probe-tests.obj steady/probe-tests.c
+          if ($LASTEXITCODE) { throw 'Calibration codec test compile failed' }
+          & ./build-baseline/probe-tests.exe
+          if ($LASTEXITCODE) { throw 'Calibration codec tests failed' }
           git rev-parse HEAD | Set-Content build-baseline/source-pin.txt
           git submodule status --recursive | Set-Content build-baseline/submodule-pins.txt
           $env:VCToolsVersion | Set-Content build-baseline/compiler-toolset-version.txt
@@ -78,6 +86,8 @@ jobs:
           Copy-Item build-baseline/app/release/Moonlight.exe baseline-package
           Copy-Item app/SDL_GameControllerDB/gamecontrollerdb.txt baseline-package
           Copy-Item LICENSE baseline-package
+          Copy-Item 'steady/Start Probe Client.cmd' baseline-package
+          Copy-Item build-baseline/steady-probe-sources.json baseline-package
           windeployqt --release --dir baseline-package --qmldir app/gui --no-translations --no-opengl-sw --no-compiler-runtime baseline-package/Moonlight.exe
           if ($LASTEXITCODE) { throw 'Qt deployment failed' }
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -113,3 +123,4 @@ jobs:
             build-baseline/compiler-toolset-version.txt
             build-baseline/runtime-dll-version.txt
             build-baseline/runtime-version.txt
+            build-baseline/steady-probe-sources.json
