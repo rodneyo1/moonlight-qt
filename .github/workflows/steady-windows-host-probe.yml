@@ -1,0 +1,154 @@
+---
+name: STEADY Windows host control calibration
+
+on:
+  push:
+    branches: [steady/windows-baseline]
+    paths: [.github/workflows/steady-windows-host-probe.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steady-host-calibration-${{ github.ref }}
+  # Preserve compiler/test evidence; follow-up baseline fixes wait their turn.
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: rodneyo1/Sunshine
+          ref: 19bfbbc35a674fb851e54c71ecd2d1a6492c5da2
+          persist-credentials: false
+
+      - name: Fetch pinned build dependencies without codec source trees
+        shell: pwsh
+        run: |
+          # uv checks local package metadata for all locked groups, including Flatpak tools.
+          git submodule update --init --depth 1 third-party/build-deps packaging/linux/flatpak/deps/flatpak-builder-tools
+          if ($LASTEXITCODE) { throw 'build-deps checkout failed' }
+          git submodule update --init --recursive --depth 1 third-party/Simple-Web-Server third-party/TPCircularBuffer third-party/ViGEmClient third-party/glad third-party/libdisplaydevice third-party/libvirtualhid third-party/lizardbyte-common third-party/moonlight-common-c third-party/nvapi third-party/tray
+          if ($LASTEXITCODE) { throw 'Windows dependency checkout failed' }
+
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          location: 'C:\'
+          release: false
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-cppwinrt
+            mingw-w64-ucrt-x86_64-curl-winssl
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-libtiff
+            mingw-w64-ucrt-x86_64-miniupnpc
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-onevpl
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-qt6-static
+            mingw-w64-ucrt-x86_64-MinHook
+
+      - name: Verify required Windows shell location
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath 'C:\msys64\msys2_shell.cmd')) { throw 'Expected C:\msys64 shell unavailable' }
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+
+      - name: Resolve native Windows npm for the UCRT64 build
+        shell: pwsh
+        run: |
+          $nativeNpm = (Get-Command npm.cmd -ErrorAction Stop).Source -replace '\\', '/'
+          "STEADY_NPM=$nativeNpm" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $nativeNpm --version
+          if ($LASTEXITCODE) { throw 'Native npm is unavailable' }
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
+
+      - name: Sync locked repository tools
+        shell: pwsh
+        run: uv sync --locked
+
+      - name: Record effective UCRT64 dependency environment
+        shell: cmd
+        run: |
+          call C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c "mkdir -p baseline-package && pacman -Q > baseline-package/msys2-packages.txt && pkg-config --modversion libtiff-4 harfbuzz && pkg-config --static --libs harfbuzz && gcc --version && cmake --version"
+
+      - name: Build Windows host and tests with opt-in control calibration
+        shell: cmd
+        run: |
+          call C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c "cmake -S . -B cmake-build-baseline -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_DOCS=OFF -DBUILD_TESTS=ON -DNPM='%STEADY_NPM%' -DSUNSHINE_ASSETS_DIR=assets -DSUNSHINE_PUBLISHER_NAME=STEADY -DSUNSHINE_PUBLISHER_ISSUE_URL=https://github.com/rodneyo1/Sunshine/issues && cmake --build cmake-build-baseline --parallel 2"
+
+      - name: Run upstream tests
+        shell: cmd
+        run: |
+          call C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c "cd cmake-build-baseline/tests && ./test_sunshine.exe --gtest_color=yes --gtest_output=xml:test_results.xml"
+
+      - name: Install complete portable baseline using upstream rules
+        shell: cmd
+        run: |
+          call C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c "cmake --install cmake-build-baseline --prefix $PWD/baseline-package"
+
+      - name: Record pins and verify portable baseline
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory baseline-package -Force | Out-Null
+          git rev-parse HEAD | Set-Content baseline-package/source-pin.txt
+          git submodule status --recursive | Set-Content baseline-package/submodule-pins.txt
+          Copy-Item LICENSE baseline-package
+          Copy-Item 'steady/Start Probe Host.cmd' baseline-package
+          Get-FileHash steady/SteadyProbe.h | ConvertTo-Json | Set-Content baseline-package/steady-probe-source.json
+          foreach ($requiredFile in @('sunshine.exe', 'zlib1.dll', 'tools/sunshinesvc.exe', 'scripts/add-firewall-rule.bat', 'scripts/install-service.bat', 'assets/web/index.html')) {
+            if (-not (Test-Path -LiteralPath "baseline-package/$requiredFile")) { throw "Incomplete package: $requiredFile" }
+          }
+
+      - name: Check staged host runtime without build-tool DLL paths
+        shell: pwsh
+        run: |
+          $savedPath = $env:PATH
+          Push-Location baseline-package
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $versionOutput = & .\sunshine.exe --version 2>&1
+            $versionExit = $LASTEXITCODE
+            $versionOutput | Tee-Object runtime-version.txt
+            if ($versionExit -ne 0) { throw "Staged Sunshine runtime failed: $versionExit" }
+            if (($versionOutput -join "`n") -notmatch 'Sunshine version:\s+\S+') {
+              throw 'Staged Sunshine did not report its version; zero exit alone is insufficient'
+            }
+          } finally {
+            $env:PATH = $savedPath
+            Pop-Location
+          }
+
+      - name: Preserve baseline evidence and binaries
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sunshine-windows-x64-baseline
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            baseline-package/
+            cmake-build-baseline/CMakeCache.txt
+            cmake-build-baseline/CMakeFiles/CMakeConfigureLog.yaml
+            cmake-build-baseline/tests/test_results.xml
