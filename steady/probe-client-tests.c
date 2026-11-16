@@ -18,6 +18,7 @@ static int EncryptionFeaturesEnabled = SS_ENC_CONTROL_V2;
 static uint64_t fakeClock, clockStep, sendCount, failAt, cancelAt;
 static unsigned lossModulo;
 static bool negativeBracket, duplicateReply, threadFails, clockFails;
+static bool cancelDuringDrain;
 static unsigned locks;
 
 static int PltCreateMutex(PLT_MUTEX* mutex) { *mutex = 1; return 0; }
@@ -29,6 +30,7 @@ static bool PltIsThreadInterrupted(PLT_THREAD* thread) { return thread->interrup
 static void PltSleepMsInterruptible(PLT_THREAD* thread, unsigned ms) {
     fakeClock += ms == STEADY_PROBE_DRAIN_MS ? (uint64_t)ms*1000000 : clockStep;
     if (sendCount >= cancelAt) thread->interrupted = true;
+    if (ms == STEADY_PROBE_DRAIN_MS && cancelDuringDrain) thread->interrupted = true;
 }
 static int PltCreateThread(const char* name, void (*entry)(void*), void* context, PLT_THREAD* thread) {
     (void)name; (void)entry; (void)context; (void)thread; return threadFails ? -1 : 0;
@@ -74,7 +76,7 @@ static void reset(void) {
     steadyProbeStopReason = STEADY_PROBE_STOP_THREAD;
     fakeClock = UINT64_C(1000000000); clockStep = 4000000;
     sendCount = 0; failAt = cancelAt = UINT64_MAX;
-    lossModulo = 0; negativeBracket = duplicateReply = threadFails = clockFails = false;
+    lossModulo = 0; negativeBracket = duplicateReply = threadFails = clockFails = cancelDuringDrain = false;
     locks = 0;
 }
 
@@ -101,6 +103,10 @@ int main(void) {
     reset(); cancelAt = 10;
     steadyProbeSendThread(NULL);
     CHECK(steadyProbeStopReason == STEADY_PROBE_STOP_CANCEL && sendCount == 10 && !steadyProbeAcceptReplies);
+    reset(); cancelDuringDrain = true;
+    steadyProbeSendThread(NULL);
+    CHECK(steadyProbeStopReason == STEADY_PROBE_STOP_CANCEL && steadyProbeUsable >= STEADY_PROBE_TARGET);
+    CHECK(!steadyProbeAcceptReplies && locks == 0);
     reset(); failAt = 100;
     steadyProbeSendThread(NULL);
     CHECK(steadyProbeStopReason == STEADY_PROBE_STOP_SEND && sendCount == 100);

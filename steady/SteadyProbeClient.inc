@@ -101,6 +101,9 @@ static void steadyProbeSendThread(void* context) {
     /* One fixed grace window, then seal under the receive lock. Export timing
        cannot convert an unanswered attempt into a reply after this boundary. */
     PltSleepMsInterruptible(&steadyProbeThread,STEADY_PROBE_DRAIN_MS);
+    if (PltIsThreadInterrupted(&steadyProbeThread) &&
+            (reason == STEADY_PROBE_STOP_TARGET || reason == STEADY_PROBE_STOP_CAPACITY || reason == STEADY_PROBE_STOP_TIMEOUT))
+        reason = STEADY_PROBE_STOP_CANCEL;
     PltLockMutex(&steadyProbeMutex);
     steadyProbeAcceptReplies = false;
     steadyProbeStopReason = reason;
