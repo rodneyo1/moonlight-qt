@@ -11,7 +11,7 @@ int main(void) {
     unsigned i;
     CHECK(steady_probe_request(request,UINT64_MAX,0,123));
     CHECK(steady_probe_valid(request,64,1));
-    CHECK(request[0] == 1 && request[1] == 1 && request[3] == 64 && request[31] == 123);
+    CHECK(request[0] == STEADY_PROBE_VERSION && request[1] == 1 && request[3] == 64 && request[31] == 123);
     for (i = 8; i < 16; ++i) CHECK(request[i] == 255);
     CHECK(steady_probe_reply(reply,request,64,1,456,789,10000000));
     CHECK(steady_probe_valid(reply,64,2) && steady_probe_get64(reply+32) == 456 && steady_probe_get64(reply+40) == 789);
@@ -42,6 +42,11 @@ int main(void) {
         CHECK(!steady_probe_reply_once(&session,reply,request,64,1,456,789,10000000));
     }
     CHECK(!steady_probe_request(request,7,STEADY_PROBE_SAMPLES,123));
+    CHECK(steady_probe_request(request,7,STEADY_PROBE_SAMPLES-1,123));
+    memcpy(bad,request,64); bad[0] = 1;
+    CHECK(!steady_probe_valid(bad,64,1));
+    memcpy(bad,request,64); steady_probe_put64(bad+16,STEADY_PROBE_SAMPLES);
+    CHECK(!steady_probe_valid(bad,64,1));
     CHECK(steady_probe_request(request,8,0,123));
     CHECK(!steady_probe_reply_once(&session,reply,request,64,1,456,789,10000000));
     CHECK(session.generation == 7);
@@ -52,16 +57,26 @@ int main(void) {
     CHECK(!steady_probe_reply_once(NULL,reply,request,64,1,456,789,10000000));
     CHECK(!steady_probe_sdp_version(NULL));
     CHECK(!steady_probe_sdp_version(""));
-    CHECK(steady_probe_sdp_version("v=0\r\na=x-steady-input.probeVersion:1\r\n"));
-    CHECK(steady_probe_sdp_version("a=x-steady-input.probeVersion:1"));
+    CHECK(steady_probe_sdp_version("v=0\r\na=x-steady-input.probeVersion:2\r\n") == STEADY_PROBE_VERSION);
+    CHECK(steady_probe_sdp_version("a=x-steady-input.probeVersion:2") == STEADY_PROBE_VERSION);
     CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:11\r\n"));
     CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:1junk\n"));
     CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:1\na=x-steady-input.probeVersion:1\n"));
     CHECK(!steady_probe_sdp_version("x-a=x-steady-input.probeVersion:1\n"));
-    CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:2\n"));
+    CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:1\n"));
+    CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:2\na=x-steady-input.probeVersion:2\n"));
+    CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:2junk\n"));
+    CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:2\na=x-steady-input.probeVersion:1\n"));
     CHECK(!steady_probe_sdp_version("a=x-steady-input.probeVersion:\n"));
     CHECK(steady_probe_now(&now,&frequency) && now && frequency);
     CHECK(!steady_probe_now(NULL,&frequency) && !steady_probe_now(&now,NULL));
-    printf("PASS: C calibration codec, exact SDP, authentication seam, 10000 unique probes/replays, generation and QPC guards\n");
+    CHECK(steady_probe_collection_stop(0,0,0) == STEADY_PROBE_RUNNING);
+    CHECK(steady_probe_collection_stop(10000,9938,STEADY_PROBE_MIN_NS) == STEADY_PROBE_RUNNING);
+    CHECK(steady_probe_collection_stop(10000,10000,STEADY_PROBE_MIN_NS-1) == STEADY_PROBE_RUNNING);
+    CHECK(steady_probe_collection_stop(10100,10000,STEADY_PROBE_MIN_NS) == STEADY_PROBE_STOP_TARGET);
+    CHECK(steady_probe_collection_stop(STEADY_PROBE_SAMPLES,9999,STEADY_PROBE_MIN_NS) == STEADY_PROBE_STOP_CAPACITY);
+    CHECK(steady_probe_collection_stop(10000,9999,STEADY_PROBE_MAX_NS) == STEADY_PROBE_STOP_TIMEOUT);
+    CHECK(steady_probe_collection_stop(10000,9999,STEADY_PROBE_MAX_NS-1) == STEADY_PROBE_RUNNING);
+    printf("PASS: v2 C calibration codec, exact SDP, authentication seam, 12000 unique probes/replays, collection bounds, generation and QPC guards\n");
     return 0;
 }

@@ -11,7 +11,44 @@
 
 #define STEADY_PROBE_TYPE 0x5354
 #define STEADY_PROBE_BYTES 64
-#define STEADY_PROBE_SAMPLES 10000
+#define STEADY_PROBE_VERSION 2
+#define STEADY_PROBE_SAMPLES 12000
+#define STEADY_PROBE_TARGET 10000
+#define STEADY_PROBE_MIN_NS UINT64_C(30000000000)
+#define STEADY_PROBE_MAX_NS UINT64_C(180000000000)
+#define STEADY_PROBE_DRAIN_MS 1000
+
+/** @brief Explicit terminal states for the bounded diagnostic collector. */
+enum steady_probe_stop {
+  STEADY_PROBE_RUNNING = 0,
+  STEADY_PROBE_STOP_TARGET = 1,
+  STEADY_PROBE_STOP_CAPACITY = 2,
+  STEADY_PROBE_STOP_TIMEOUT = 3,
+  STEADY_PROBE_STOP_SEND = 4,
+  STEADY_PROBE_STOP_CLOCK = 5,
+  STEADY_PROBE_STOP_CANCEL = 6,
+  STEADY_PROBE_STOP_THREAD = 7
+};
+
+/**
+ * @brief Decide whether a bounded collection needs another independent attempt.
+ * @param attempted Number of attempted unique probes.
+ * @param usable First replies passing the local exchange time checks.
+ * @param elapsed_ns Time since the first attempt on the client clock.
+ * @return Running, target met, capacity exhausted, or timeout reached.
+ */
+static inline enum steady_probe_stop steady_probe_collection_stop(uint64_t attempted, uint64_t usable, uint64_t elapsed_ns) {
+  if (usable >= STEADY_PROBE_TARGET && elapsed_ns >= STEADY_PROBE_MIN_NS) {
+    return STEADY_PROBE_STOP_TARGET;
+  }
+  if (attempted >= STEADY_PROBE_SAMPLES) {
+    return STEADY_PROBE_STOP_CAPACITY;
+  }
+  if (elapsed_ns >= STEADY_PROBE_MAX_NS) {
+    return STEADY_PROBE_STOP_TIMEOUT;
+  }
+  return STEADY_PROBE_RUNNING;
+}
 
 /** @brief Bounded per-session diagnostic replay state, owned by control thread. */
 typedef struct steady_probe_session {
@@ -30,9 +67,9 @@ static inline int steady_probe_opt_in(void) {
 }
 
 /**
- * @brief Accept exactly one complete version-1 SDP attribute line.
+ * @brief Accept exactly one complete supported SDP attribute line.
  * @param sdp NUL-terminated SDP already bounded by the RTSP parser.
- * @return One for exactly one canonical supported attribute, otherwise zero.
+ * @return Supported version for exactly one canonical attribute, otherwise zero.
  */
 static inline unsigned steady_probe_sdp_version(const char *sdp) {
   const char prefix[] = "a=x-steady-input.probeVersion:";
@@ -48,7 +85,7 @@ static inline unsigned steady_probe_sdp_version(const char *sdp) {
       --length;
     }
     if (length >= sizeof(prefix) - 1 && memcmp(line, prefix, sizeof(prefix) - 1) == 0) {
-      if (++matches != 1 || length != sizeof(prefix) || line[sizeof(prefix) - 1] != '1') {
+      if (++matches != 1 || length != sizeof(prefix) || line[sizeof(prefix) - 1] != '0' + STEADY_PROBE_VERSION) {
         return 0;
       }
     }
@@ -57,7 +94,7 @@ static inline unsigned steady_probe_sdp_version(const char *sdp) {
     }
     line = end + 1;
   }
-  return matches;
+  return matches ? STEADY_PROBE_VERSION : 0;
 }
 
 /** @brief Decode one big-endian 64-bit field. @param p Field bytes. @return Value. */
@@ -90,7 +127,7 @@ static inline int steady_probe_valid(const unsigned char *p, size_t size, unsign
   if (!p || size != STEADY_PROBE_BYTES || (kind != 1 && kind != 2)) {
     return 0;
   }
-  if (p[0] != 1 || p[1] != kind || p[2] != 0 || p[3] != STEADY_PROBE_BYTES || p[4] || p[5] || p[6] || p[7] || steady_probe_get64(p + 56)) {
+  if (p[0] != STEADY_PROBE_VERSION || p[1] != kind || p[2] != 0 || p[3] != STEADY_PROBE_BYTES || p[4] || p[5] || p[6] || p[7] || steady_probe_get64(p + 56)) {
     return 0;
   }
   if (!steady_probe_get64(p + 8) || steady_probe_get64(p + 16) >= STEADY_PROBE_SAMPLES || !steady_probe_get64(p + 24)) {
@@ -107,7 +144,7 @@ static inline int steady_probe_valid(const unsigned char *p, size_t size, unsign
  * @brief Construct a canonical request; invalid values leave output unchanged.
  * @param output Destination frame.
  * @param generation Fresh nonzero per-session generation.
- * @param sequence Probe identity below the fixed sample count.
+ * @param sequence Probe identity below the fixed inventory capacity.
  * @param t1 Client pre-send QPC nanoseconds.
  * @return Nonzero on success.
  */
@@ -116,7 +153,7 @@ static inline int steady_probe_request(unsigned char *output, uint64_t generatio
   if (!output || !generation || sequence >= STEADY_PROBE_SAMPLES || !t1) {
     return 0;
   }
-  frame[0] = 1;
+  frame[0] = STEADY_PROBE_VERSION;
   frame[1] = 1;
   frame[3] = STEADY_PROBE_BYTES;
   steady_probe_put64(frame + 8, generation);
