@@ -104,6 +104,7 @@ jobs:
           $runtimeDirectory = $runtimeDll.DirectoryName
           Copy-Item "$runtimeDirectory\*.dll" baseline-package
           $runtimeVersion.ToString() | Set-Content build-baseline/runtime-dll-version.txt
+          Copy-Item 'steady/Start Steady Input.cmd','steady/Start-SteadyInput.ps1','steady/INPUT-PROTOTYPE.md' baseline-package
           New-Item -ItemType File baseline-package/portable.dat -Force | Out-Null
 
       - name: Verify portable runtime entry point

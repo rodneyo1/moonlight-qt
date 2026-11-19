@@ -511,7 +511,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         m_KeysDown.remove(MAKE_KEYPRESS_STATE(keyCode, modifiers, flags));
     }
 
-    LiSendKeyboardEvent2(keyCode,
+    LiSendKeyboardEventTimed(static_cast<unsigned short>(event->keysym.scancode), keyCode,
                          event->state == SDL_PRESSED ?
                              KEY_ACTION_DOWN : KEY_ACTION_UP,
                          modifiers,
@@ -529,7 +529,7 @@ void SdlInputHandler::raiseAllKeys()
                 (int)m_KeysDown.count());
 
     for (auto keyDown : std::as_const(m_KeysDown)) {
-        LiSendKeyboardEvent2(GET_KEYPRESS_CODE(keyDown),
+        LiSendKeyboardEventTimed(0, GET_KEYPRESS_CODE(keyDown),
                              KEY_ACTION_UP,
                              GET_KEYPRESS_EXTENDED_MODIFIER(keyDown),
                              GET_KEYPRESS_FLAGS(keyDown));

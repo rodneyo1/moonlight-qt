@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: rodneyo1/Sunshine
-          ref: e011a515d65df671236af9b422187b03773ed432
+          ref: c5575398e1a585c1b62e0c2ae850ae033e454e4f
           persist-credentials: false
 
       - name: Fetch pinned build dependencies without codec source trees
@@ -116,6 +116,7 @@ jobs:
           git submodule status --recursive | Set-Content baseline-package/submodule-pins.txt
           Copy-Item LICENSE baseline-package
           Copy-Item 'steady/Start Probe Host.cmd' baseline-package
+          Copy-Item 'steady/Start Steady Input.cmd','steady/Start-SteadyInput.ps1','steady/INPUT-PROTOTYPE.md' baseline-package
           Get-FileHash steady/SteadyProbe.h | ConvertTo-Json | Set-Content baseline-package/steady-probe-source.json
           foreach ($requiredFile in @('sunshine.exe', 'zlib1.dll', 'tools/sunshinesvc.exe', 'scripts/add-firewall-rule.bat', 'scripts/install-service.bat', 'assets/web/index.html')) {
             if (-not (Test-Path -LiteralPath "baseline-package/$requiredFile")) { throw "Incomplete package: $requiredFile" }
