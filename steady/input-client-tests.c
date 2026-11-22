@@ -43,12 +43,13 @@ int LiSendKeyboardEvent2(short code,char action,char modifiers,char flags) { (vo
 #define steady_probe_now fake_now
 #include "SteadyInputClient.inc"
 #undef steady_probe_now
-static void reset(void) {
+static void prepare(void) {
     if (siEnabled) { steadyInputStop(); siEnabled=false; PltDeleteMutex(&siMutex); }
     totalSent=legacy=terminated=locks=0;sendFails=threadFails=clockFails=false;fakeTime=1000000000;fakeFrequency=10000000;
     SetEnvironmentVariableA("STEADY_INPUT_ENABLE","1");SetEnvironmentVariableA("STEADY_INPUT_TRACE","unused-client-test.csv");
-    steadyInputSetPeerVersion(1);steadyInputInit();steadyInputStart();
+    steadyInputSetPeerVersion(1);steadyInputInit();
 }
+static void reset(void) { prepare();steadyInputStart(); }
 static void offer(void) {
     unsigned char p[64];memcpy(p,lastFrame,64);p[5]=SI_OFFER;steady_probe_put64(p+32,9000000000);
     steadyInputReceive(p,64);
@@ -59,6 +60,13 @@ int main(void) {
     CHECK(steady_input_sdp_version("a=x-steady-input.keyboardVersion:1\r\n")==1);
     CHECK(!steady_input_sdp_version("a=x-steady-input.keyboardVersion:1\na=x-steady-input.keyboardVersion:1\n"));
     CHECK(!steady_input_sdp_version("a=x-steady-input.keyboardVersion:10\n"));
+    prepare();fakeTime+=600000000;steadyInputStart();
+    CHECK(siState==1 && totalSent==1 && steady_probe_get64(lastFrame+24)==fakeTime && siStart==fakeTime && siLast==fakeTime);
+    offer();ready();fakeTime+=STEADY_INPUT_LIFETIME-1;CHECK(!LiSendKeyboardEventTimed(4,(short)-32703,3,0,0));
+    ++fakeTime;CHECK(LiSendKeyboardEventTimed(4,(short)-32703,4,0,0)==-1 && terminated==1);
+    prepare();clockFails=true;steadyInputStart();CHECK(siState==0 && !totalSent && !siThreadStarted);
+    prepare();fakeFrequency++;steadyInputStart();CHECK(siState==0 && !totalSent && !siThreadStarted);
+    prepare();fakeTime--;steadyInputStart();CHECK(siState==0 && !totalSent && !siThreadStarted);
     reset();CHECK(siEnabled && siState==1 && totalSent==1 && steady_input_valid(lastFrame,64));
     CHECK(LiSendKeyboardEventTimed(4,(short)-32703,3,0,0)==17);offer();CHECK(siState==0 && legacy==1 && totalSent==1);
     reset();offer();CHECK(siState==2 && totalSent==2 && lastFrame[5]==SI_COMMIT);

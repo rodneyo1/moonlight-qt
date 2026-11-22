@@ -46,7 +46,12 @@ static void steadyInputWatch(void* context) {
     }
 }
 static void steadyInputStart(void) {
+    uint64_t now,freq;
     if (!siEnabled) return;
+    /* The frozen anchor is HELLO creation, not earlier control initialization.
+     * Startup work between init/start must not become permanent input delay. */
+    if (!steady_probe_now(&now,&freq) || freq!=siFrequency || now<siLast) { siState=0; return; }
+    siStart=siLast=now;
     steady_input_frame(siOffer,SI_HELLO,siGeneration); steady_probe_put64(siOffer+24,siStart);
     siState=1;
     if (PltCreateThread("SteadyInput",steadyInputWatch,NULL,&siThread)) { siState=0; return; }
