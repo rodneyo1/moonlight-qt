@@ -91,6 +91,17 @@ int main(void) {
     for(i=59;i<64;++i) {p[i]=1;CHECK(!steady_input_valid(p,64));p[i]=0;}
     CHECK(!steady_input_valid(p,63));CHECK(!steady_input_valid(NULL,64));p[58]=2;CHECK(!steady_input_valid(p,64));
     memcpy(p,copy,64);p[57]=0;CHECK(!steady_input_valid(p,64));
+    /* Trace capacity: deterministic fill under the fake clock, not a real-time soak or live qualification. */
+    CHECK(STEADY_INPUT_TRACE_ORIGINALS==115200 && STEADY_INPUT_CLIENT_TRACE_ROWS>=STEADY_INPUT_TRACE_ORIGINALS);
+    CHECK(sizeof(siTrace)/sizeof(siTrace[0])==STEADY_INPUT_CLIENT_TRACE_ROWS);
+    reset();offer();ready();
+    for(i=0;i<STEADY_INPUT_CLIENT_TRACE_ROWS;++i) {fakeTime+=100;CHECK(!LiSendKeyboardEventTimed(4,(short)-32703,(i&1)?4:3,0,0));}
+    CHECK(siTraceUsed==STEADY_INPUT_CLIENT_TRACE_ROWS && !siTraceOverflow && siState==3 && !terminated && !locks);
+    CHECK(siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][0]==STEADY_INPUT_CLIENT_TRACE_ROWS && siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][1]==fakeTime);
+    CHECK(siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][2]==4 && !siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][3] && siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][4]==1 && siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS-1][5]==3);
+    fakeTime+=100;CHECK(LiSendKeyboardEventTimed(4,(short)-32703,3,0,0)==-1);
+    CHECK(siTraceUsed==STEADY_INPUT_CLIENT_TRACE_ROWS && siTraceOverflow==1 && siState==4 && terminated==1 && !legacy);
+    fakeTime+=100;CHECK(LiSendKeyboardEventTimed(4,(short)-32703,4,0,0)==-1 && siTraceOverflow==1 && terminated==1 && !legacy);
     reset();steadyInputStop();siEnabled=false;CHECK(LiSendKeyboardEventTimed(4,(short)-32703,3,0,0)==17);
-    CHECK(!locks);puts("PASS: client activation, precommit fallback, buffered commit, synthetic releases, terminal faults, bounded ingress and strict frame/SDP checks");return 0;
+    CHECK(!locks);puts("PASS: client activation, precommit fallback, buffered commit, synthetic releases, terminal faults, bounded ingress, exact trace last slot/overflow and strict frame/SDP checks");return 0;
 }

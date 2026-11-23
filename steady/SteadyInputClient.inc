@@ -13,7 +13,7 @@ static unsigned siPendingCount;
 static uint64_t siGeneration,siSequence,siStart,siFrequency,siLast;
 static unsigned short siCodes[256];
 static unsigned char siFlags[256],siModifiers[256],siHeld[256];
-static uint64_t siTrace[32768][6];
+static uint64_t siTrace[STEADY_INPUT_CLIENT_TRACE_ROWS][6]; /* Static storage: no allocation on the input path. */
 static unsigned siTraceUsed,siTraceOverflow;
 static char siTracePath[32768];
 static bool steadyInputSend(const unsigned char* frame) {
@@ -102,7 +102,7 @@ int LiSendKeyboardEventTimed(unsigned short usage,short keyCode,char action,char
             if (siPendingCount==64) failed=true;
             else memcpy(siPending[siPendingCount++],frame,sizeof(frame));
         } else if (!(sent=steadyInputSend(frame))) failed=true;
-        if (siTraceUsed<32768) {
+        if (siTraceUsed<STEADY_INPUT_CLIENT_TRACE_ROWS) {
             uint64_t* row=siTrace[siTraceUsed++]; row[0]=siSequence; row[1]=now; row[2]=usage; row[3]=frame[58]; row[4]=sent&&!failed; row[5]=siState;
         } else { ++siTraceOverflow; failed=true; }
     }

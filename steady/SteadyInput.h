@@ -10,6 +10,12 @@
 #define STEADY_INPUT_VERSION 1
 #define STEADY_INPUT_RESERVE UINT64_C(40000000)
 #define STEADY_INPUT_LIFETIME UINT64_C(60000000000)
+/** @brief Planned trace span in original key events: 2 h at 8 keydowns/s, each with one release. */
+#define STEADY_INPUT_TRACE_ORIGINALS (2u * 3600u * 8u * 2u)
+/** @brief Fixed client original-trace rows; covers STEADY_INPUT_TRACE_ORIGINALS (115200) with headroom. */
+#define STEADY_INPUT_CLIENT_TRACE_ROWS 131072u
+/** @brief Fixed host trace rows; one receipt and one backend row per original (230400) plus cleanup headroom. */
+#define STEADY_INPUT_HOST_TRACE_ROWS 262144u
 
 /** @brief Reliable startup and keyboard record kinds. */
 enum steady_input_kind {
