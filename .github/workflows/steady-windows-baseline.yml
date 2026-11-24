@@ -68,6 +68,10 @@ jobs:
           if ($LASTEXITCODE) { throw 'Client collector test compile failed' }
           & ./build-baseline/probe-client-tests.exe
           if ($LASTEXITCODE) { throw 'Client collector tests failed' }
+          & cl.exe /nologo /std:c11 /W4 /WX /wd4100 /wd4232 /wd5105 /wd4505 /MT /O2 /Fe:build-baseline/input-client-tests.exe /Fo:build-baseline/input-client-tests.obj steady/input-client-tests.c
+          if ($LASTEXITCODE) { throw 'Calibrated keyboard adapter compile failed' }
+          & ./build-baseline/input-client-tests.exe
+          if ($LASTEXITCODE) { throw 'Calibrated keyboard adapter tests failed' }
           git rev-parse HEAD | Set-Content build-baseline/source-pin.txt
           git submodule status --recursive | Set-Content build-baseline/submodule-pins.txt
           $env:VCToolsVersion | Set-Content build-baseline/compiler-toolset-version.txt
