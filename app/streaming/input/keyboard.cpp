@@ -3,6 +3,13 @@
 #include <Limelight.h>
 #include "SDL_compat.h"
 
+#ifdef Q_OS_WIN32
+// Before the VK_* fallbacks below, since this header includes <windows.h>.
+#include "../../../steady/SteadyCapture.h"
+#include <atomic>
+#include <array>
+#endif
+
 #define VK_0 0x30
 #define VK_A 0x41
 
@@ -21,6 +28,8 @@
 #define GET_KEYPRESS_CODE(x) ((short)((x) & 0xFFFF))
 #define GET_KEYPRESS_EXTENDED_MODIFIER(x) ((char)(((x) >> 16) & 0xFF))
 #define GET_KEYPRESS_FLAGS(x) ((char)(((x) >> 24) & 0xFF))
+
+#include "../../../steady/SteadySdlCapture.inc"
 
 void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 {
@@ -188,6 +197,24 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
     char modifiers;
     char flags;
     bool shouldNotConvertToScanCodeOnServer = false;
+
+#ifdef Q_OS_WIN32
+    // STEADY: take this event's pre-queue stamp before any early return, so the
+    // token is consumed even for repeats, special combos and unsupported keys.
+    uint64_t steadyCaptureNs = 0;
+    if (m_SteadyCaptureOptIn) {
+        steady_capture::Lookup lookup = s_SteadyRing.take(event->keysym.unused,
+                                                          (uint32_t)event->keysym.scancode,
+                                                          event->state == SDL_PRESSED);
+        steadyCaptureNs = lookup.capture_ns;
+        if (lookup.result != steady_capture::Result::Ok && m_SteadyCaptureFaults++ == 0) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "STEADY keyboard capture stamp %s (scancode %d); timed originals fail closed",
+                        steady_capture::name(lookup.result),
+                        (int)event->keysym.scancode);
+        }
+    }
+#endif
 
     if (event->repeat) {
         // Ignore repeat key down events
@@ -510,6 +537,20 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
     else {
         m_KeysDown.remove(MAKE_KEYPRESS_STATE(keyCode, modifiers, flags));
     }
+
+#ifdef Q_OS_WIN32
+    if (m_SteadyCaptureOptIn) {
+        // Original event with its SDL-enqueue stamp. Zero means no valid stamp;
+        // the timed adapter rejects it after commitment. Never handler time.
+        LiSendKeyboardEventTimedAt(static_cast<unsigned short>(event->keysym.scancode), keyCode,
+                                   event->state == SDL_PRESSED ?
+                                       KEY_ACTION_DOWN : KEY_ACTION_UP,
+                                   modifiers,
+                                   flags,
+                                   steadyCaptureNs);
+        return;
+    }
+#endif
 
     LiSendKeyboardEventTimed(static_cast<unsigned short>(event->keysym.scancode), keyCode,
                          event->state == SDL_PRESSED ?

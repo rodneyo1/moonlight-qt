@@ -13,7 +13,8 @@ try {
  $env:STEADY_INPUT_ENABLE='1'
  $env:STEADY_INPUT_TRACE=$steadyTrace
  $env:STEADY_PROBE_ENABLE='0'
- Write-Host 'Experimental keyboard: fixed 40 ms reserve; disconnects after 60 seconds. Use a blank editor.'
+ Write-Host 'Calibrated keyboard (protocol 2): do not type for the first ~35-60 s while the clock is calibrated; any key before commitment keeps this connection on ordinary input.'
+ Write-Host 'Reserve: 15 ms (set STEADY_INPUT_PROFILE=standard for 25 ms). Validity is derived from the measured bounds; the stream closes at that expiry. Use a blank editor.'
  Write-Host ('Trace is saved after disconnect: '+$steadyTrace)
  if ($steadyName -eq 'Moonlight') { Start-Process -FilePath $steadyApp -WorkingDirectory $steadyFolder }
  else { Start-Process -FilePath $steadyApp -WorkingDirectory $steadyFolder -WindowStyle Hidden }

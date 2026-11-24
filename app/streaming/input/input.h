@@ -188,6 +188,12 @@ private:
 
     void performSpecialKeyCombo(KeyCombo combo);
 
+    // STEADY (Windows, STEADY_INPUT_ENABLE=1 only): SDL event filter that stamps
+    // keyboard events before SDL enqueues them. State is static, never per-handler.
+    void installSteadyCapture();
+
+    void removeSteadyCapture();
+
     static
     Uint32 longPressTimerCallback(Uint32 interval, void* param);
 
@@ -249,6 +255,10 @@ private:
     SDL_TimerID m_DragTimer;
     char m_DragButton;
     int m_NumFingersDown;
+
+    bool m_SteadyCaptureOptIn;
+    bool m_SteadyCaptureInstalled;
+    unsigned int m_SteadyCaptureFaults;
 
     static const int k_ButtonMap[];
 };

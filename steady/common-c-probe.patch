@@ -137,14 +137,22 @@
          }
 --- a/src/Limelight.h
 +++ b/src/Limelight.h
-@@ -712,6 +712,10 @@
- // interpreted as-is. This is a Sunshine protocol extension.
+@@ -713,5 +713,17 @@
  #define SS_KBE_FLAG_NON_NORMALIZED 0x01
  int LiSendKeyboardEvent2(short keyCode, char keyAction, char modifiers, char flags);
+-
 +
-+// Opt-in fixed-buffer prototype; usage is a USB keyboard-page code, or zero
++// Opt-in calibrated frozen keyboard; usage is a USB keyboard-page code, or zero
 +// when releasing an already tracked key. Falls back only before commitment.
 +int LiSendKeyboardEventTimed(unsigned short usage, short keyCode, char keyAction, char modifiers, char flags);
- 
++// As above, with the original pre-queue capture time in client QPC nanoseconds.
++// Zero is accepted only for a synthetic release (usage zero, key up), which uses
++// the call time; an original with zero capture fails a committed session.
++int LiSendKeyboardEventTimedAt(unsigned short usage, short keyCode, char keyAction, char modifiers, char flags, uint64_t captureNs);
++// Pre-queue capture availability: set by the input handler only once its event
++// filter is installed, cleared at its teardown. Kept across connections; COMMIT
++// requires it, and originals fail closed once it is cleared. Ignored off Windows.
++void LiSteadyInputSetCaptureAvailable(int available);
++
  // This function queues an UTF-8 encoded text to be sent to the remote server.
  int LiSendUtf8TextEvent(const char *text, unsigned int length);

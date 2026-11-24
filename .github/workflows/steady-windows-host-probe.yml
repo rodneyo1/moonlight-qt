@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: rodneyo1/Sunshine
-          ref: 573fff0fffe731b834c016b11d7e5e8c6adf416e
+          ref: 563aef9cab654839cd90de09f61c6e9eb5a65f2d
           persist-credentials: false
 
       - name: Fetch pinned build dependencies without codec source trees

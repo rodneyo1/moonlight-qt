@@ -33,8 +33,16 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_RightButtonReleaseTimer(0),
       m_DragTimer(0),
       m_DragButton(0),
-      m_NumFingersDown(0)
+      m_NumFingersDown(0),
+      m_SteadyCaptureOptIn(false),
+      m_SteadyCaptureInstalled(false),
+      m_SteadyCaptureFaults(0)
 {
+    // STEADY opt-in only. Must precede joystick/gamecontroller init: setting an
+    // event filter may discard or re-filter pending events (SDL2 flushes the
+    // queue), which would otherwise drop gamepad arrival events.
+    installSteadyCapture();
+
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -263,6 +271,9 @@ SdlInputHandler::~SdlInputHandler()
     // video backends.
     SDL_ShowCursor(SDL_DISABLE);
 #endif
+
+    // Last, mirroring installation first in the constructor.
+    removeSteadyCapture();
 }
 
 void SdlInputHandler::setWindow(SDL_Window *window)
